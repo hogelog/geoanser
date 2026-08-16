@@ -1,6 +1,7 @@
 import React, {useMemo, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {feature} from 'topojson-client';
+import {geoEquirectangular,geoPath} from 'd3-geo';
 import atlas from 'world-atlas/countries-110m.json';
 import './style.css';
 
@@ -30,12 +31,11 @@ function Map({target,region}:{target:Country;region:Region}){
   const [zoom,setZoom]=useState(1);
   const [pan,setPan]=useState({x:0,y:0});
   const [drag,setDrag]=useState<{x:number;y:number;panX:number;panY:number}|null>(null);
-  const scale=Math.min(w/(x1-x0),h/(y1-y0));
-  const ox=(w-(x1-x0)*scale)/2,oy=(h-(y1-y0)*scale)/2;
-  const project=([lon,lat]:[number,number])=>[ox+(lon-x0)*scale,oy+(y1-lat)*scale];
-  const path=(coords:any):string=>coords.map((ring:any)=>ring.map(([lon,lat]:number[],i:number)=>`${i?'L':'M'}${ox+(lon-x0)*scale},${oy+(y1-lat)*scale}`).join(' ')+'Z').join(' ');
+  const pixelsPerDegree=Math.min(w/(x1-x0),h/(y1-y0));
+  const projection=geoEquirectangular().center([(x0+x1)/2,(y0+y1)/2]).translate([w/2,h/2]).scale(pixelsPerDegree*180/Math.PI).clipExtent([[0,0],[w,h]]);
+  const drawPath=geoPath(projection);
   const center=smallCountryCenters[target.id];
-  const marker=center?project(center):null;
+  const marker=center?projection(center):null;
   const viewW=w/zoom,viewH=h/zoom;
   const viewX=(w-viewW)/2+pan.x,viewY=(h-viewH)/2+pan.y;
   function changeZoom(next:number){setZoom(Math.max(1,Math.min(4,next)));if(next<=1)setPan({x:0,y:0})}
@@ -45,7 +45,7 @@ function Map({target,region}:{target:Country;region:Region}){
       onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);setDrag({x:e.clientX,y:e.clientY,panX:pan.x,panY:pan.y})}}
       onPointerMove={e=>{if(!drag)return;const rect=e.currentTarget.getBoundingClientRect();setPan({x:drag.panX-(e.clientX-drag.x)*viewW/rect.width,y:drag.panY-(e.clientY-drag.y)*viewH/rect.height})}}
       onPointerUp={()=>setDrag(null)} onPointerCancel={()=>setDrag(null)}>
-      <g>{geo.features.map((f:any)=>{const d=f.geometry.type==='Polygon'?path(f.geometry.coordinates):f.geometry.coordinates.map(path).join(' ');return <path key={f.id} d={d} className={+f.id===target.id?'country target':'country'}/>})}</g>
+      <g>{geo.features.map((f:any)=><path key={f.id} d={drawPath(f)??undefined} className={+f.id===target.id?'country target':'country'}/>)}</g>
       {marker&&<g className="small-country-marker" transform={`translate(${marker[0]} ${marker[1]})`} aria-label={`${target.name}の位置`}><circle className="marker-pulse" r="17"/><circle className="marker-dot" r="7"/><path d="M0 8 L-5 17 L5 17 Z"/></g>}
     </svg>
     <div className="map-controls" aria-label="地図の拡大縮小"><button onClick={()=>changeZoom(zoom+.5)} disabled={zoom>=4} aria-label="拡大">＋</button><button onClick={()=>changeZoom(zoom-.5)} disabled={zoom<=1} aria-label="縮小">−</button><button onClick={()=>{setZoom(1);setPan({x:0,y:0})}} aria-label="地図をリセット">⟳</button></div>
