@@ -20,7 +20,24 @@ const regionEmoji:Record<Region,string>={'アジア':'🌏','ヨーロッパ':'�
 const bounds:Record<Region,[number,number,number,number]>={'世界':[-180,-60,180,85],'アジア':[25,-10,180,82],'ヨーロッパ':[-25,33,60,72],'アフリカ':[-20,-38,55,38],'北アメリカ':[-170,5,-45,85],'南アメリカ':[-85,-58,-30,15],'オセアニア':[105,-50,180,10]};
 const geo:any=feature(atlas as any,(atlas as any).objects.countries);
 const shuffle=<T,>(a:T[])=>[...a].sort(()=>Math.random()-.5);
-function Map({target,region}:{target:Country;region:Region}){const [x0,y0,x1,y1]=bounds[region]; const w=900,h=480; const sx=w/(x1-x0),sy=h/(y1-y0); const scale=Math.min(sx,sy); const ox=(w-(x1-x0)*scale)/2,oy=(h-(y1-y0)*scale)/2; const path=(coords:any):string=>coords.map((ring:any)=>ring.map(([lon,lat]:number[],i:number)=>`${i?'L':'M'}${ox+(lon-x0)*scale},${oy+(y1-lat)*scale}`).join(' ')+'Z').join(' '); return <svg className="map" viewBox={`0 0 ${w} ${h}`} aria-label={`${region}の地図`}><g>{geo.features.map((f:any)=>{const d=f.geometry.type==='Polygon'?path(f.geometry.coordinates):f.geometry.coordinates.map(path).join(' ');return <path key={f.id} d={d} className={+f.id===target.id?'country target':'country'}/>})}</g></svg>}
+const smallCountryCenters:Record<number,[number,number]>={
+  20:[1.6,42.55],48:[50.55,26.07],96:[114.73,4.54],196:[33.43,35.13],
+  275:[35.23,31.95],414:[47.48,29.31],442:[6.13,49.81],634:[51.18,25.32],
+  702:[103.82,1.35]
+};
+function Map({target,region}:{target:Country;region:Region}){
+  const [x0,y0,x1,y1]=bounds[region];const w=900,h=480;
+  const scale=Math.min(w/(x1-x0),h/(y1-y0));
+  const ox=(w-(x1-x0)*scale)/2,oy=(h-(y1-y0)*scale)/2;
+  const project=([lon,lat]:[number,number])=>[ox+(lon-x0)*scale,oy+(y1-lat)*scale];
+  const path=(coords:any):string=>coords.map((ring:any)=>ring.map(([lon,lat]:number[],i:number)=>`${i?'L':'M'}${ox+(lon-x0)*scale},${oy+(y1-lat)*scale}`).join(' ')+'Z').join(' ');
+  const center=smallCountryCenters[target.id];
+  const marker=center?project(center):null;
+  return <svg className="map" viewBox={`0 0 ${w} ${h}`} aria-label={`${region}の地図`}>
+    <g>{geo.features.map((f:any)=>{const d=f.geometry.type==='Polygon'?path(f.geometry.coordinates):f.geometry.coordinates.map(path).join(' ');return <path key={f.id} d={d} className={+f.id===target.id?'country target':'country'}/>})}</g>
+    {marker&&<g className="small-country-marker" transform={`translate(${marker[0]} ${marker[1]})`} aria-label={`${target.name}の位置`}><circle className="marker-pulse" r="17"/><circle className="marker-dot" r="7"/><path d="M0 8 L-5 17 L5 17 Z"/></g>}
+  </svg>
+}
 function App(){
   type Attempt={countryId:number;correct:boolean;answeredAt:string};
   type Mode='all'|'review';
