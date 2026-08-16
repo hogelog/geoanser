@@ -54,6 +54,7 @@ function Map({target,region}:{target:Country;region:Region}){
 }
 function App(){
   type Attempt={countryId:number;correct:boolean;answeredAt:string};
+  type QuizResult={region:Region;correct:number;total:number;completedAt:string};
   type Mode='all'|'review';
   const storageKey='geoanswer:attempts:v1';
   const [screen,setScreen]=useState<'home'|'quiz'|'result'>('home');
@@ -67,6 +68,9 @@ function App(){
   const [attempts,setAttempts]=useState<Attempt[]>(()=>{
     try{const saved=JSON.parse(localStorage.getItem(storageKey)??'[]');return Array.isArray(saved)?saved:[]}catch{return []}
   });
+  const [quizResults,setQuizResults]=useState<QuizResult[]>(()=>{
+    try{const saved=JSON.parse(localStorage.getItem('geoanswer:quiz-results:v1')??'[]');return Array.isArray(saved)?saved:[]}catch{return []}
+  });
   const pool=useMemo(()=>region==='世界'?countries:countries.filter(c=>c.region===region),[region]);
   const latestByCountry=useMemo(()=>{const latest=new globalThis.Map<number,Attempt>();for(const attempt of attempts)latest.set(attempt.countryId,attempt);return latest},[attempts]);
   const eligiblePool=useMemo(()=>mode==='all'?pool:pool.filter(c=>{const latest=latestByCountry.get(c.id);return !latest||!latest.correct}),[mode,pool,latestByCountry]);
@@ -74,14 +78,16 @@ function App(){
   const options=useMemo(()=>current?shuffle([current,...shuffle(pool.filter(c=>c.id!==current.id)).slice(0,3)]):[],[current,pool]);
   function statsFor(ids:number[]){
     const idSet=new Set(ids);const records=attempts.filter(a=>idSet.has(a.countryId));const correct=records.filter(a=>a.correct).length;
-    const countryRates=ids.map(id=>{const own=records.filter(a=>a.countryId===id);return own.length?own.filter(a=>a.correct).length/own.length*100:null}).filter((rate):rate is number=>rate!==null);
-    return {attempted:records.length,correct,rate:records.length?Math.round(correct/records.length*100):null,highest:countryRates.length?Math.round(Math.max(...countryRates)):null,average:countryRates.length?Math.round(countryRates.reduce((sum,rate)=>sum+rate,0)/countryRates.length):null,studiedCountries:countryRates.length}
+    const studiedCountries=ids.filter(id=>records.some(a=>a.countryId===id)).length;
+    return {attempted:records.length,correct,rate:records.length?Math.round(correct/records.length*100):null,studiedCountries}
   }
+  function regionSessionStats(targetRegion:Region){const records=quizResults.filter(result=>result.region===targetRegion);const rates=records.map(result=>result.correct/result.total*100);return {count:records.length,highest:rates.length?Math.round(Math.max(...rates)):null,average:rates.length?Math.round(rates.reduce((sum,rate)=>sum+rate,0)/rates.length):null}}
   function countryStats(countryId:number){const records=attempts.filter(a=>a.countryId===countryId);const correct=records.filter(a=>a.correct).length;return {attempted:records.length,rate:records.length?Math.round(correct/records.length*100):null,previous:records.at(choice===null?-1:-2)}}
   function start(){if(!eligiblePool.length)return;setQuestions(shuffle(eligiblePool).slice(0,Math.min(limit,eligiblePool.length)));setI(0);setScore(0);setChoice(null);setScreen('quiz')}
   function answer(country:Country){if(choice!==null||!current)return;const correct=country.id===current.id;const nextAttempts=[...attempts,{countryId:current.id,correct,answeredAt:new Date().toISOString()}];setChoice(country.id);if(correct)setScore(value=>value+1);setAttempts(nextAttempts);localStorage.setItem(storageKey,JSON.stringify(nextAttempts))}
-  function next(){if(i+1>=questions.length)setScreen('result');else{setI(value=>value+1);setChoice(null)}}
+  function next(){if(i+1>=questions.length){const nextResults=[...quizResults,{region,correct:score,total:questions.length,completedAt:new Date().toISOString()}];setQuizResults(nextResults);localStorage.setItem('geoanswer:quiz-results:v1',JSON.stringify(nextResults));setScreen('result')}else{setI(value=>value+1);setChoice(null)}}
   const selectedRegionStats=statsFor(pool.map(c=>c.id));
+  const selectedSessionStats=regionSessionStats(region);
   const currentStats=current?countryStats(current.id):null;
   return <main>
     {screen==='home'&&<section className="home">
@@ -91,7 +97,7 @@ function App(){
         <div><label>地域をえらぶ</label><div className="regions">{(['アジア','ヨーロッパ','アフリカ','北アメリカ','南アメリカ','オセアニア','世界'] as Region[]).map(r=>{const list=r==='世界'?countries:countries.filter(c=>c.region===r);const stats=statsFor(list.map(c=>c.id));return <button className={region===r?'selected':''} onClick={()=>setRegion(r)} key={r}><b>{regionEmoji[r]}</b>{r}<small>{stats.rate===null?'未挑戦':`正答率 ${stats.rate}%`}</small></button>})}</div></div>
         <div className="count"><label>問題数</label><div>{[10,30,50,100].map(n=><button className={limit===n?'selected':''} onClick={()=>setLimit(n)} key={n}>{n}</button>)}</div><small>{eligiblePool.length<limit?`${region}は対象の全${eligiblePool.length}か国を出題します`:`ランダムに${limit}問出題します`}</small></div>
         <div className="mode"><label>出題モード</label><div><button className={mode==='all'?'selected':''} onClick={()=>setMode('all')}><b>すべて</b><span>地域からランダム</span></button><button className={mode==='review'?'selected':''} onClick={()=>setMode('review')}><b>復習</b><span>未挑戦・前回不正解のみ</span></button></div></div>
-        <div className="region-summary"><span>{region}の学習記録</span>{selectedRegionStats.rate===null?<b>まだ記録がありません</b>:<div className="rate-metrics"><span><b>{selectedRegionStats.highest}%</b><small>最高正答率</small></span><span><b>{selectedRegionStats.average}%</b><small>平均正答率</small></span><span><b>{selectedRegionStats.rate}%</b><small>累計正答率</small></span></div>}<small>{selectedRegionStats.attempted}回回答・{selectedRegionStats.studiedCountries}か国に挑戦</small></div>
+        <div className="region-summary"><span>{region}の学習記録</span>{selectedRegionStats.rate===null?<b>まだ記録がありません</b>:<div className="rate-metrics"><span><b>{selectedSessionStats.highest??'—'}%</b><small>クイズ最高</small></span><span><b>{selectedSessionStats.average??'—'}%</b><small>クイズ平均</small></span><span><b>{selectedRegionStats.rate}%</b><small>全回答</small></span></div>}<small>{selectedSessionStats.count}回完了・{selectedRegionStats.studiedCountries}か国に挑戦</small></div>
         <button className="start" onClick={start} disabled={!eligiblePool.length}>{eligiblePool.length?'クイズをはじめる':'復習する問題はありません'} <span>{eligiblePool.length?'→':'✓'}</span></button>
       </div>
     </section>}
@@ -100,7 +106,7 @@ function App(){
       <div className="quizbody"><p className="eyebrow">{regionEmoji[region]} {region} CHALLENGE</p><h2>色がついた国はどこ？</h2><div className="mapwrap"><Map key={current.id} target={current} region={region}/><span className="zoomnote">指で移動・ボタンで拡大できます</span></div><div className="answers">{options.map((c,n)=>{const cls=choice===null?'':c.id===current.id?'correct':choice===c.id?'wrong':'muted';return <button disabled={choice!==null} className={cls} onClick={()=>answer(c)} key={c.id}><kbd>{n+1}</kbd>{c.name}<span>{cls==='correct'?'✓':cls==='wrong'?'×':''}</span></button>})}</div></div>
       {choice!==null&&<footer className={choice===current.id?'good':'bad'}><div><b>{choice===current.id?'そのとおり！':'おしい！'}</b><span>{choice===current.id?'ナイス、正解です。':`正解は「${current.name}」です。`}</span><small className="country-history">{current.name}：正答率 {currentStats?.rate}%（{currentStats?.attempted}回）{currentStats?.previous&&!currentStats.previous.correct?'・前回は不正解':''}</small></div><button onClick={next}>{i+1===questions.length?'結果を見る':'つぎへ'} →</button></footer>}
     </section>}
-    {screen==='result'&&<section className="result"><div className="trophy">🏆</div><p className="eyebrow">QUIZ COMPLETE</p><h1>おつかれさま！</h1><div className="score"><b>{score}</b><span>/ {questions.length} 問正解</span></div><p>{score===questions.length?'パーフェクト！世界博士ですね。':score/questions.length>=.7?'すごい！かなりの地理通です。':'もう一度挑戦して覚えよう！'}</p><div className="result-history"><div className="rate-metrics"><span><b>{statsFor(pool.map(c=>c.id)).highest??'—'}%</b><small>最高</small></span><span><b>{statsFor(pool.map(c=>c.id)).average??'—'}%</b><small>平均</small></span><span><b>{statsFor(pool.map(c=>c.id)).rate??'—'}%</b><small>累計</small></span></div><span>回答ログはこの端末に保存されています</span></div><button className="start" onClick={start} disabled={!eligiblePool.length}>もう一度チャレンジ <span>↻</span></button><button className="back" onClick={()=>setScreen('home')}>設定にもどる</button></section>}
+    {screen==='result'&&<section className="result"><div className="trophy">🏆</div><p className="eyebrow">QUIZ COMPLETE</p><h1>おつかれさま！</h1><div className="score"><b>{score}</b><span>/ {questions.length} 問正解</span></div><p>{score===questions.length?'パーフェクト！世界博士ですね。':score/questions.length>=.7?'すごい！かなりの地理通です。':'もう一度挑戦して覚えよう！'}</p><div className="result-history"><div className="rate-metrics"><span><b>{regionSessionStats(region).highest??'—'}%</b><small>地域最高</small></span><span><b>{regionSessionStats(region).average??'—'}%</b><small>地域平均</small></span><span><b>{statsFor(pool.map(c=>c.id)).rate??'—'}%</b><small>全回答</small></span></div><span>完了したクイズと国別回答ログをこの端末に保存しています</span></div><button className="start" onClick={start} disabled={!eligiblePool.length}>もう一度チャレンジ <span>↻</span></button><button className="back" onClick={()=>setScreen('home')}>設定にもどる</button></section>}
   </main>
 }
 window.addEventListener('keydown',(event)=>{
