@@ -27,16 +27,30 @@ const smallCountryCenters:Record<number,[number,number]>={
 };
 function Map({target,region}:{target:Country;region:Region}){
   const [x0,y0,x1,y1]=bounds[region];const w=900,h=480;
+  const [zoom,setZoom]=useState(1);
+  const [pan,setPan]=useState({x:0,y:0});
+  const [drag,setDrag]=useState<{x:number;y:number;panX:number;panY:number}|null>(null);
   const scale=Math.min(w/(x1-x0),h/(y1-y0));
   const ox=(w-(x1-x0)*scale)/2,oy=(h-(y1-y0)*scale)/2;
   const project=([lon,lat]:[number,number])=>[ox+(lon-x0)*scale,oy+(y1-lat)*scale];
   const path=(coords:any):string=>coords.map((ring:any)=>ring.map(([lon,lat]:number[],i:number)=>`${i?'L':'M'}${ox+(lon-x0)*scale},${oy+(y1-lat)*scale}`).join(' ')+'Z').join(' ');
   const center=smallCountryCenters[target.id];
   const marker=center?project(center):null;
-  return <svg className="map" viewBox={`0 0 ${w} ${h}`} aria-label={`${region}の地図`}>
-    <g>{geo.features.map((f:any)=>{const d=f.geometry.type==='Polygon'?path(f.geometry.coordinates):f.geometry.coordinates.map(path).join(' ');return <path key={f.id} d={d} className={+f.id===target.id?'country target':'country'}/>})}</g>
-    {marker&&<g className="small-country-marker" transform={`translate(${marker[0]} ${marker[1]})`} aria-label={`${target.name}の位置`}><circle className="marker-pulse" r="17"/><circle className="marker-dot" r="7"/><path d="M0 8 L-5 17 L5 17 Z"/></g>}
-  </svg>
+  const viewW=w/zoom,viewH=h/zoom;
+  const viewX=(w-viewW)/2+pan.x,viewY=(h-viewH)/2+pan.y;
+  function changeZoom(next:number){setZoom(Math.max(1,Math.min(4,next)));if(next<=1)setPan({x:0,y:0})}
+  return <div className="map-stage">
+    <svg className={`map ${drag?'dragging':''}`} viewBox={`${viewX} ${viewY} ${viewW} ${viewH}`} aria-label={`${region}の地図。ドラッグで移動できます`}
+      onWheel={e=>{e.preventDefault();changeZoom(zoom+(e.deltaY<0?.5:-.5))}}
+      onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);setDrag({x:e.clientX,y:e.clientY,panX:pan.x,panY:pan.y})}}
+      onPointerMove={e=>{if(!drag)return;const rect=e.currentTarget.getBoundingClientRect();setPan({x:drag.panX-(e.clientX-drag.x)*viewW/rect.width,y:drag.panY-(e.clientY-drag.y)*viewH/rect.height})}}
+      onPointerUp={()=>setDrag(null)} onPointerCancel={()=>setDrag(null)}>
+      <g>{geo.features.map((f:any)=>{const d=f.geometry.type==='Polygon'?path(f.geometry.coordinates):f.geometry.coordinates.map(path).join(' ');return <path key={f.id} d={d} className={+f.id===target.id?'country target':'country'}/>})}</g>
+      {marker&&<g className="small-country-marker" transform={`translate(${marker[0]} ${marker[1]})`} aria-label={`${target.name}の位置`}><circle className="marker-pulse" r="17"/><circle className="marker-dot" r="7"/><path d="M0 8 L-5 17 L5 17 Z"/></g>}
+    </svg>
+    <div className="map-controls" aria-label="地図の拡大縮小"><button onClick={()=>changeZoom(zoom+.5)} disabled={zoom>=4} aria-label="拡大">＋</button><button onClick={()=>changeZoom(zoom-.5)} disabled={zoom<=1} aria-label="縮小">−</button><button onClick={()=>{setZoom(1);setPan({x:0,y:0})}} aria-label="地図をリセット">⟳</button></div>
+    {zoom>1&&<span className="zoom-level">{zoom}×</span>}
+  </div>
 }
 function App(){
   type Attempt={countryId:number;correct:boolean;answeredAt:string};
@@ -79,7 +93,7 @@ function App(){
     </section>}
     {screen==='quiz'&&current&&<section className="quiz">
       <header><button className="quit" onClick={()=>setScreen('home')}>×</button><div className="progress"><i style={{width:`${((i+(choice!==null?1:0))/questions.length)*100}%`}}/></div><span>{i+1} / {questions.length}</span></header>
-      <div className="quizbody"><p className="eyebrow">{regionEmoji[region]} {region} CHALLENGE</p><h2>色がついた国はどこ？</h2><div className="mapwrap"><Map target={current} region={region}/><span className="zoomnote">地域全体から位置を見つけよう</span></div><div className="answers">{options.map((c,n)=>{const cls=choice===null?'':c.id===current.id?'correct':choice===c.id?'wrong':'muted';return <button disabled={choice!==null} className={cls} onClick={()=>answer(c)} key={c.id}><kbd>{n+1}</kbd>{c.name}<span>{cls==='correct'?'✓':cls==='wrong'?'×':''}</span></button>})}</div></div>
+      <div className="quizbody"><p className="eyebrow">{regionEmoji[region]} {region} CHALLENGE</p><h2>色がついた国はどこ？</h2><div className="mapwrap"><Map key={current.id} target={current} region={region}/><span className="zoomnote">指で移動・ボタンで拡大できます</span></div><div className="answers">{options.map((c,n)=>{const cls=choice===null?'':c.id===current.id?'correct':choice===c.id?'wrong':'muted';return <button disabled={choice!==null} className={cls} onClick={()=>answer(c)} key={c.id}><kbd>{n+1}</kbd>{c.name}<span>{cls==='correct'?'✓':cls==='wrong'?'×':''}</span></button>})}</div></div>
       {choice!==null&&<footer className={choice===current.id?'good':'bad'}><div><b>{choice===current.id?'そのとおり！':'おしい！'}</b><span>{choice===current.id?'ナイス、正解です。':`正解は「${current.name}」です。`}</span><small className="country-history">{current.name}：正答率 {currentStats?.rate}%（{currentStats?.attempted}回）{currentStats?.previous&&!currentStats.previous.correct?'・前回は不正解':''}</small></div><button onClick={next}>{i+1===questions.length?'結果を見る':'つぎへ'} →</button></footer>}
     </section>}
     {screen==='result'&&<section className="result"><div className="trophy">🏆</div><p className="eyebrow">QUIZ COMPLETE</p><h1>おつかれさま！</h1><div className="score"><b>{score}</b><span>/ {questions.length} 問正解</span></div><p>{score===questions.length?'パーフェクト！世界博士ですね。':score/questions.length>=.7?'すごい！かなりの地理通です。':'もう一度挑戦して覚えよう！'}</p><div className="result-history"><b>{region}の累計正答率 {statsFor(pool.map(c=>c.id)).rate??'—'}%</b><span>回答ログはこの端末に保存されています</span></div><button className="start" onClick={start} disabled={!eligiblePool.length}>もう一度チャレンジ <span>↻</span></button><button className="back" onClick={()=>setScreen('home')}>設定にもどる</button></section>}
